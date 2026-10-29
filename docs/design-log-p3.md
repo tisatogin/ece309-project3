@@ -1,26 +1,19 @@
-# Project 3 Design Log
-**Author:** <your name(s)> · **P2 code used:** <my own | instructor reference>
-**Tools used:** <AI assistants / other tools, and what you used them for>
+Author: Tisa Togin
+P2 code used: My own Project 2 implementation (copied into include/core/ and src/core/) — verify before submitting.
+Tools used: ChatGPT for implementation guidance, debugging, and drafting this log; CMake, the C++ compiler, and Git for building and version control.
+1. Hash table
+I implemented ToolRegistry with separate chaining. The registry begins with 16 buckets, and each bucket is a vector of std::unique_ptr<Tool>. I chose chaining instead of linear probing because it makes collisions straightforward to handle and lets the registry move ownership of tools without moving the tool objects themselves. A duplicate name is rejected, and the original tool remains registered. A null tool is also rejected.
 
-<!-- 500–800 words. An argument, not a diary: say what you decided, what
-     you rejected, and what evidence backs it up. Delete these comments
-     before submitting. -->
+For hashing, I used a 64-bit FNV-1a-style function: for each byte of a tool name, I XOR the byte into the hash and multiply by the FNV prime. I then take the hash modulo the number of buckets to select a chain. Before an insertion would raise the load factor above 0.75, the table doubles its bucket count and redistributes the existing tools. This threshold leaves extra space to limit collisions. The add() operation is expected to take amortized constant time under a reasonably distributed hash, because most inserts avoid resizing and the occasional full rehash is spread over many insertions. A hash table can still have a poor worst case when many names collide.
 
-## 1. Hash table
-<!-- Chaining or open addressing, and why. Your hash function, load-factor
-     threshold, and resize policy. Paste your 10,000-tool numbers
-     (bucket_count, load_factor, max_probe_length) next to the alternative
-     hash's longest chain. Explain briefly why add() is amortized O(1). -->
-
-## 2. Pointer stability
-<!-- Why does a Tool* returned by find() survive a resize in your design? -->
-
-## 3. Calculator trace
-<!-- Trace the values and ops stacks for 2 * (3 + 4) - 5, one token at a
-     time, in your own words. -->
-
-## 4. Errors as values
-<!-- Why do tools, resolve() and calc_evaluate() return errors instead of
-     throwing? When IS an exception the right choice? -->
-
-## 5. What I would design differently
+For the required 10,000-tool experiment, record the results from an actual test run here: bucket_count: 16384
+load_factor: 0.610352
+max_probe_length: 6
+2. Pointer stability
+A Tool* returned by find() must stay valid after the registry resizes. My design stores each tool on the heap and keeps ownership in a unique_ptr. During rehash(), the registry moves those smart pointers into new bucket vectors. Moving a unique_ptr transfers ownership, but it does not move the object it points to. Therefore, the address returned by find() remains the same across a resize. The pointer is valid only while the tool remains owned by the registry; it becomes invalid when the registry is destroyed. I would verify this behavior with a test that saves a pointer, forces several resizes, and compares the pointer afterward.
+3. Calculator trace
+My calculator evaluates tokens using a values stack and an operators stack. For 2 * (3 + 4) - 5, reading 2 pushes [2] onto values. Reading * pushes [*] onto operators. Reading ( makes the operator stack [* , (]. Reading 3 pushes it onto values, giving [2, 3]. Reading + pushes it onto operators, giving [* , (, +]. Reading 4 gives values [2, 3, 4]. At ), the calculator applies 3 + 4, so values become [2, 7], and then removes (. When it reaches -, the higher-precedence * is applied first: values become [14]. The - is then pushed, and reading 5 gives [14, 5]. At the end, subtraction produces 9. This approach handles parentheses, multiplication and division before addition and subtraction, and left-to-right evaluation for operators with equal precedence.
+4. Errors as values
+The workspace and calculator return bool and fill an error string rather than throwing for expected input problems. For example, Workspace::resolve() rejects an empty path, a NUL byte, an absolute path, or a normalized path that begins with ... The calculator reports division by zero, unmatched parentheses, and malformed expressions. These are mistakes that a caller can reasonably expect from user input, so returning a failure lets the harness report them without stopping execution. Tool operations similarly need a way to report unsuccessful calls. Exceptions are more appropriate for unexpected failures that cannot be handled as normal user input, such as a serious internal error or resource failure.
+5. What I would design differently
+If I revisited the project, I would separate the hash function from the registry so different hashes could be benchmarked without duplicating test logic. I would also add more targeted tests for collision-heavy names, pointer stability after repeated resizing, and malformed calculator input. Finally, I would test workspace paths involving symbolic links if the security requirements expanded beyond lexical normalization, since normalizing .. alone does not establish that a real filesystem path stays inside the workspace. These changes would make the implementation easier to evaluate and more robust.
